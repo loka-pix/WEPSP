@@ -440,6 +440,7 @@
             }
         }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
     <div id="game-container">
@@ -493,7 +494,7 @@
         <div id="menu-overlay">
             <h2>🎮 PSP EMULATOR MENU</h2>
             
-            <input type="file" id="bios-input" class="file-input" accept=".bin,.rom">
+            <input type="file" id="bios-input" class="file-input" accept=".zip,.bin,.rom">
             <label for="bios-input" class="file-label">📦 Load PSP BIOS</label>
             
             <input type="file" id="iso-input" class="file-input" accept=".iso,.cso,.chd">
@@ -505,7 +506,7 @@
             <input type="file" id="plugin-input" class="file-input" accept=".zip">
             <label for="plugin-input" class="file-label">🔌 Load Plugin (ZIP)</label>
             
-            <input type="file" id="save-import-input" class="file-input" accept=".json">
+            <input type="file" id="save-import-input" class="file-input" accept=".zip,.json">
             <label for="save-import-input" class="file-label">📥 Import Save Data</label>
             
             <button class="menu-button" onclick="exportSaveData()">💾 Export Save Data</button>
@@ -580,6 +581,9 @@
                 L: false, R: false, start: false, select: false
             };
             
+            this.analogStick = { x: 0, y: 0 };
+            this.analogDragging = false;
+            
             document.querySelectorAll('[data-button]').forEach(elem => {
                 const button = elem.dataset.button;
                 
@@ -588,6 +592,7 @@
                         e.preventDefault();
                         this.buttons[button] = true;
                         elem.classList.add('pressed');
+                        this.log(`Button pressed: ${button}`);
                     });
                 });
                 
@@ -599,6 +604,66 @@
                     });
                 });
             });
+            
+            this.initAnalogStick();
+        }
+        
+        initAnalogStick() {
+            const analogStick = document.querySelector('.analog-stick-inner');
+            const analogBase = document.querySelector('.analog-base');
+            let startX, startY, baseRect;
+            
+            const handleStart = (e) => {
+                e.preventDefault();
+                this.analogDragging = true;
+                baseRect = analogBase.getBoundingClientRect();
+                const touch = e.touches ? e.touches[0] : e;
+                startX = touch.clientX;
+                startY = touch.clientY;
+            };
+            
+            const handleMove = (e) => {
+                if (!this.analogDragging) return;
+                e.preventDefault();
+                
+                const touch = e.touches ? e.touches[0] : e;
+                const deltaX = touch.clientX - (baseRect.left + baseRect.width / 2);
+                const deltaY = touch.clientY - (baseRect.top + baseRect.height / 2);
+                
+                const maxRadius = baseRect.width / 2 - 20;
+                const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                
+                let x = deltaX;
+                let y = deltaY;
+                
+                if (distance > maxRadius) {
+                    x = (deltaX / distance) * maxRadius;
+                    y = (deltaY / distance) * maxRadius;
+                }
+                
+                analogStick.style.transform = `translate(${x}px, ${y}px)`;
+                
+                this.analogStick.x = x / maxRadius;
+                this.analogStick.y = y / maxRadius;
+            };
+            
+            const handleEnd = (e) => {
+                if (!this.analogDragging) return;
+                e.preventDefault();
+                this.analogDragging = false;
+                analogStick.style.transform = 'translate(0, 0)';
+                this.analogStick.x = 0;
+                this.analogStick.y = 0;
+            };
+            
+            analogStick.addEventListener('touchstart', handleStart, { passive: false });
+            analogStick.addEventListener('mousedown', handleStart);
+            
+            window.addEventListener('touchmove', handleMove, { passive: false });
+            window.addEventListener('mousemove', handleMove);
+            
+            window.addEventListener('touchend', handleEnd, { passive: false });
+            window.addEventListener('mouseup', handleEnd);
         }
 
         initKeyMappings() {
@@ -647,14 +712,52 @@
             };
         }
 
-        loadBIOS(file) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                this.bios = new Uint8Array(e.target.result);
-                this.log(`BIOS loaded: ${(this.bios.length / 1024).toFixed(2)} KB`);
-                this.ram.set(this.bios.slice(0, Math.min(this.bios.length, 4 * 1024 * 1024)), 0);
-            };
-            reader.readAsArrayBuffer(file);
+        async loadBIOS(file) {
+            if (file.name.endsWith('.zip')) {
+                this.log('Loading BIOS from ZIP archive...');
+                try {
+                    const zip = await JSZip.loadAsync(file);
+                    this.biosFiles = {};
+                    let totalSize = 0;
+                    
+                    for (const [filename, zipEntry] of Object.entries(zip.files)) {
+                        if (!zipEntry.dir) {
+                            const ext = filename.split('.').pop().toLowerCase();
+                            if (['bin', 'prx', 'rco', 'pbp', 'rom'].includes(ext)) {
+                                const data = await zipEntry.async('uint8array');
+                                this.biosFiles[filename] = data;
+                                totalSize += data.length;
+                                this.log(`  - Extracted: ${filename} (${(data.length / 1024).toFixed(2)} KB)`);
+                            }
+                        }
+                    }
+                    
+                    const mainBiosFiles = Object.keys(this.biosFiles).filter(f => 
+                        f.toLowerCase().includes('bios') || 
+                        f.toLowerCase().includes('flash') ||
+                        f.toLowerCase().endsWith('.bin')
+                    );
+                    
+                    if (mainBiosFiles.length > 0) {
+                        this.bios = this.biosFiles[mainBiosFiles[0]];
+                        this.ram.set(this.bios.slice(0, Math.min(this.bios.length, 4 * 1024 * 1024)), 0);
+                        this.log(`✓ BIOS loaded: ${Object.keys(this.biosFiles).length} files, ${(totalSize / 1024).toFixed(2)} KB total`);
+                    } else {
+                        this.log('⚠ Warning: No main BIOS file found in ZIP, using HLE mode');
+                    }
+                } catch (err) {
+                    this.log(`✗ BIOS ZIP error: ${err.message}`);
+                }
+            } else {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    this.bios = new Uint8Array(e.target.result);
+                    this.biosFiles = { [file.name]: this.bios };
+                    this.log(`BIOS loaded: ${(this.bios.length / 1024).toFixed(2)} KB`);
+                    this.ram.set(this.bios.slice(0, Math.min(this.bios.length, 4 * 1024 * 1024)), 0);
+                };
+                reader.readAsArrayBuffer(file);
+            }
         }
 
         loadISO(file) {
@@ -662,9 +765,55 @@
             const reader = new FileReader();
             reader.onload = (e) => {
                 this.iso = new Uint8Array(e.target.result);
-                this.log(`ISO loaded: ${(this.iso.length / 1024 / 1024).toFixed(2)} MB`);
+                this.isoName = file.name;
+                this.log(`✓ ISO loaded: ${(this.iso.length / 1024 / 1024).toFixed(2)} MB`);
+                
+                this.parseISOHeader();
+                
+                const gameRegion = this.iso.length / 1024 / 1024 / 4;
+                const gameOffset = 4 * 1024 * 1024;
+                if (gameOffset + this.iso.length <= this.ram.length) {
+                    this.ram.set(this.iso.slice(0, Math.min(this.iso.length, 16 * 1024 * 1024)), gameOffset);
+                    this.log(`✓ Game data loaded to memory at 0x${gameOffset.toString(16)}`);
+                }
+                
+                closeMenu();
+                this.log('🎮 Ready to play! Press START or close menu to begin.');
             };
             reader.readAsArrayBuffer(file);
+        }
+        
+        parseISOHeader() {
+            if (!this.iso || this.iso.length < 0x8000) return;
+            
+            const textDecoder = new TextDecoder('ascii');
+            const volumeDescriptorOffset = 0x8000;
+            
+            if (this.iso[volumeDescriptorOffset] === 0x01) {
+                const gameTitle = textDecoder.decode(
+                    this.iso.slice(volumeDescriptorOffset + 40, volumeDescriptorOffset + 72)
+                ).trim();
+                
+                if (gameTitle) {
+                    this.log(`📀 Game Title: ${gameTitle}`);
+                    this.gameTitle = gameTitle;
+                }
+            }
+            
+            const umdPattern = new Uint8Array([0x50, 0x53, 0x50, 0x5f, 0x47, 0x41, 0x4d, 0x45]);
+            for (let i = 0; i < Math.min(this.iso.length - 8, 100000); i++) {
+                let match = true;
+                for (let j = 0; j < umdPattern.length; j++) {
+                    if (this.iso[i + j] !== umdPattern[j]) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    this.log('✓ Valid PSP_GAME signature found');
+                    break;
+                }
+            }
         }
 
         loadCheats(file) {
@@ -852,7 +1001,7 @@
             };
         }
 
-        exportSaveData() {
+        async exportSaveData() {
             if (!this.db) return this.log('Storage not ready');
             
             const transaction = this.db.transaction(['saves', 'states'], 'readonly');
@@ -862,52 +1011,121 @@
             Promise.all([
                 new Promise(resolve => savesRequest.onsuccess = () => resolve(savesRequest.result)),
                 new Promise(resolve => statesRequest.onsuccess = () => resolve(statesRequest.result))
-            ]).then(([saves, states]) => {
+            ]).then(async ([saves, states]) => {
+                const zip = new JSZip();
+                
                 const exportData = { saves, states, timestamp: Date.now() };
-                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                zip.file('savedata.json', JSON.stringify(exportData, null, 2));
+                
+                if (saves.length > 0) {
+                    const savesFolder = zip.folder('saves');
+                    saves.forEach((save, idx) => {
+                        savesFolder.file(`save_${idx}.json`, JSON.stringify(save, null, 2));
+                    });
+                }
+                
+                if (states.length > 0) {
+                    const statesFolder = zip.folder('states');
+                    states.forEach(state => {
+                        statesFolder.file(`state_${state.slot}.json`, JSON.stringify(state, null, 2));
+                    });
+                }
+                
+                const blob = await zip.generateAsync({ type: 'blob' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `psp_savedata_${Date.now()}.json`;
+                a.download = `psp_savedata_${Date.now()}.zip`;
                 a.click();
                 URL.revokeObjectURL(url);
-                this.log('Save data exported');
+                this.log('✓ Save data exported to ZIP');
             });
         }
 
-        importSaveData(file) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
+        async importSaveData(file) {
+            if (file.name.endsWith('.zip')) {
+                this.log('Importing save data from ZIP...');
                 try {
-                    const data = JSON.parse(e.target.result);
+                    const zip = await JSZip.loadAsync(file);
                     const transaction = this.db.transaction(['saves', 'states'], 'readwrite');
+                    const savesStore = transaction.objectStore('saves');
+                    const statesStore = transaction.objectStore('states');
                     
-                    if (data.saves) {
-                        const savesStore = transaction.objectStore('saves');
-                        data.saves.forEach(save => savesStore.put(save));
+                    let importedCount = 0;
+                    
+                    if (zip.files['savedata.json']) {
+                        const content = await zip.files['savedata.json'].async('text');
+                        const data = JSON.parse(content);
+                        
+                        if (data.saves) {
+                            data.saves.forEach(save => savesStore.put(save));
+                            importedCount += data.saves.length;
+                        }
+                        
+                        if (data.states) {
+                            data.states.forEach(state => statesStore.put(state));
+                            importedCount += data.states.length;
+                        }
                     }
                     
-                    if (data.states) {
-                        const statesStore = transaction.objectStore('states');
-                        data.states.forEach(state => statesStore.put(state));
+                    for (const [filename, zipEntry] of Object.entries(zip.files)) {
+                        if (!zipEntry.dir && filename.endsWith('.json') && filename !== 'savedata.json') {
+                            const content = await zipEntry.async('text');
+                            const data = JSON.parse(content);
+                            
+                            if (filename.includes('save_')) {
+                                savesStore.put(data);
+                                importedCount++;
+                            } else if (filename.includes('state_')) {
+                                statesStore.put(data);
+                                importedCount++;
+                            }
+                        }
                     }
                     
-                    this.log('Save data imported');
+                    this.log(`✓ Imported ${importedCount} save/state file(s) from ZIP`);
                 } catch (err) {
-                    this.log(`Import error: ${err.message}`);
+                    this.log(`✗ Import ZIP error: ${err.message}`);
                 }
-            };
-            reader.readAsText(file);
+            } else {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        const transaction = this.db.transaction(['saves', 'states'], 'readwrite');
+                        
+                        if (data.saves) {
+                            const savesStore = transaction.objectStore('saves');
+                            data.saves.forEach(save => savesStore.put(save));
+                        }
+                        
+                        if (data.states) {
+                            const statesStore = transaction.objectStore('states');
+                            data.states.forEach(state => statesStore.put(state));
+                        }
+                        
+                        this.log('✓ Save data imported from JSON');
+                    } catch (err) {
+                        this.log(`✗ Import error: ${err.message}`);
+                    }
+                };
+                reader.readAsText(file);
+            }
         }
 
         updateDebugInfo() {
             if (!this.debugMode) return;
             
+            const activeButtons = Object.entries(this.buttons)
+                .filter(([_, pressed]) => pressed)
+                .map(([btn, _]) => btn.toUpperCase())
+                .join(', ') || 'None';
+            
             document.getElementById('debug-system').textContent = `System: PSP-1000 | FPS: ${this.fps}`;
             document.getElementById('debug-cpu').textContent = `PC: 0x${this.cpu.pc.toString(16).padStart(8, '0').toUpperCase()}`;
-            document.getElementById('debug-registers').textContent = `v0: 0x${this.cpu.registers[2].toString(16).padStart(8, '0')}`;
-            document.getElementById('debug-memory').textContent = `RAM: ${(this.ram.length / 1024 / 1024).toFixed(1)} MB`;
-            document.getElementById('debug-gpu').textContent = `Cmds: ${this.gpu.commandCount || 0} | Verts: ${this.ge.vertexCount}`;
+            document.getElementById('debug-registers').textContent = `Buttons: ${activeButtons}`;
+            document.getElementById('debug-memory').textContent = `Analog: X=${this.analogStick.x.toFixed(2)}, Y=${this.analogStick.y.toFixed(2)}`;
+            document.getElementById('debug-gpu').textContent = `Game: ${this.iso ? '✓ Loaded' : '✗ Not loaded'} | BIOS: ${this.bios ? '✓' : '✗'}`;
         }
 
         log(message) {
@@ -1169,10 +1387,44 @@
             ctx.fillStyle = '#fff';
             ctx.font = '20px monospace';
             ctx.textAlign = 'center';
-            ctx.fillText('PSP Emulator', this.sys.canvas.width / 2, this.sys.canvas.height / 2 - 30);
-            ctx.font = '14px monospace';
-            ctx.fillText('Load BIOS and ISO to begin', this.sys.canvas.width / 2, this.sys.canvas.height / 2 + 10);
-            ctx.fillText(`FPS: ${this.sys.fps}`, this.sys.canvas.width / 2, this.sys.canvas.height / 2 + 40);
+            ctx.fillText('PSP Emulator', this.sys.canvas.width / 2, this.sys.canvas.height / 2 - 80);
+            
+            if (this.sys.gameTitle) {
+                ctx.fillStyle = '#0ff';
+                ctx.font = '16px monospace';
+                ctx.fillText(`Game: ${this.sys.gameTitle}`, this.sys.canvas.width / 2, this.sys.canvas.height / 2 - 50);
+            }
+            
+            if (this.sys.iso) {
+                ctx.fillStyle = '#0f0';
+                ctx.font = '14px monospace';
+                ctx.fillText('✓ Game Loaded - Controls Active', this.sys.canvas.width / 2, this.sys.canvas.height / 2 - 20);
+            } else {
+                ctx.fillStyle = '#888';
+                ctx.font = '14px monospace';
+                ctx.fillText('Load BIOS and ISO to begin', this.sys.canvas.width / 2, this.sys.canvas.height / 2 - 20);
+            }
+            
+            ctx.fillStyle = '#ff0';
+            ctx.font = '12px monospace';
+            ctx.fillText(`FPS: ${this.sys.fps}`, this.sys.canvas.width / 2, this.sys.canvas.height / 2 + 10);
+            
+            const activeButtons = Object.entries(this.sys.buttons)
+                .filter(([_, pressed]) => pressed)
+                .map(([btn, _]) => btn);
+            
+            if (activeButtons.length > 0) {
+                ctx.fillStyle = '#f0f';
+                ctx.font = '12px monospace';
+                ctx.fillText(`Active: ${activeButtons.join(', ')}`, this.sys.canvas.width / 2, this.sys.canvas.height / 2 + 30);
+            }
+            
+            if (Math.abs(this.sys.analogStick.x) > 0.1 || Math.abs(this.sys.analogStick.y) > 0.1) {
+                ctx.fillStyle = '#0ff';
+                ctx.font = '12px monospace';
+                ctx.fillText(`Analog: (${this.sys.analogStick.x.toFixed(2)}, ${this.sys.analogStick.y.toFixed(2)})`, 
+                    this.sys.canvas.width / 2, this.sys.canvas.height / 2 + 50);
+            }
         }
 
         getState() {
