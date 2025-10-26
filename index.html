@@ -1,0 +1,1846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>PSP Emulator - PlayStation Portable</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; touch-action: manipulation; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #eee; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        
+        #header { background: linear-gradient(to bottom, #0f3460, #16213e); padding: 10px 15px; text-align: center; border-bottom: 3px solid #e94560; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(233,69,96,0.3); }
+        #header h1 { color: #e94560; text-shadow: 2px 2px 4px #000; font-size: 20px; font-weight: bold; }
+        #system-indicator { font-size: 13px; color: #00d9ff; font-weight: bold; background: rgba(0,217,255,0.1); padding: 4px 10px; border-radius: 8px; border: 1px solid #00d9ff; }
+        #fps-counter { font-size: 12px; color: #0f0; background: rgba(0,0,0,0.8); padding: 5px 10px; border-radius: 8px; border: 1px solid #0f0; font-family: monospace; min-width: 70px; text-align: center; }
+        
+        #screen-container { flex: 1; display: flex; justify-content: center; align-items: center; overflow: hidden; background: #000; position: relative; border: 10px solid #0f3460; border-radius: 20px; margin: 15px; box-shadow: inset 0 0 30px rgba(0,0,0,0.9), 0 0 40px rgba(233,69,96,0.4); }
+        #screen { background: #000; image-rendering: pixelated; image-rendering: crisp-edges; max-width: 100%; max-height: 100%; border: 3px solid #e94560; border-radius: 5px; box-shadow: 0 0 20px rgba(233,69,96,0.6); }
+        
+        #controls { background: linear-gradient(to bottom, #0f3460, #16213e); padding: 15px; display: flex; flex-direction: column; gap: 12px; border-top: 3px solid #e94560; box-shadow: 0 -4px 15px rgba(233,69,96,0.3); }
+        .control-row { display: flex; justify-content: space-between; gap: 10px; }
+        .control-button { background: linear-gradient(to bottom, #e94560, #c13548); border: 2px solid #a01030; color: white; padding: 14px; border-radius: 12px; flex: 1; font-size: 15px; font-weight: bold; text-shadow: 1px 1px 2px #000; box-shadow: 0 4px 0 #a01030, 0 6px 10px rgba(0,0,0,0.5); cursor: pointer; transition: all 0.1s; }
+        .control-button:active { background: linear-gradient(to bottom, #ff5577, #e94560); transform: translateY(3px); box-shadow: 0 1px 0 #a01030, 0 2px 5px rgba(0,0,0,0.5); }
+        
+        #dpad-container { display: flex; justify-content: space-between; align-items: center; margin: 10px 0; gap: 25px; }
+        #dpad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 6px; width: 150px; height: 150px; }
+        .dpad-button { background: linear-gradient(to bottom, #00d9ff, #0099cc); border: 3px solid #006688; color: white; border-radius: 12px; font-size: 20px; font-weight: bold; text-shadow: 1px 1px 2px #000; box-shadow: 0 4px 0 #006688, 0 6px 10px rgba(0,0,0,0.5); cursor: pointer; transition: all 0.1s; user-select: none; }
+        .dpad-button:active, .dpad-button.pressed { background: linear-gradient(to bottom, #00ffff, #00d9ff); transform: translateY(3px); box-shadow: 0 1px 0 #006688, 0 2px 5px rgba(0,0,0,0.5); filter: brightness(1.3); }
+        #dpad-up { grid-column: 2; grid-row: 1; }
+        #dpad-left { grid-column: 1; grid-row: 2; }
+        #dpad-center { grid-column: 2; grid-row: 2; background: linear-gradient(to bottom, #16213e, #0f3460); pointer-events: none; border-color: #e94560; }
+        #dpad-right { grid-column: 3; grid-row: 2; }
+        #dpad-down { grid-column: 2; grid-row: 3; }
+        
+        #action-buttons { display: flex; justify-content: center; gap: 20px; flex: 1; flex-wrap: wrap; align-items: center; }
+        .action-button { width: 65px; height: 65px; border-radius: 50%; border: 3px solid; color: white; font-size: 15px; font-weight: bold; text-shadow: 1px 1px 2px #000; cursor: pointer; box-shadow: 0 4px 0 rgba(0,0,0,0.3), 0 6px 12px rgba(0,0,0,0.5); transition: all 0.1s; user-select: none; }
+        .action-button:active, .action-button.pressed { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,0.3), 0 2px 5px rgba(0,0,0,0.5); filter: brightness(1.2); }
+        
+        .psp-triangle { background: linear-gradient(to bottom, #33ff33, #00cc00); border-color: #008800; }
+        .psp-circle { background: linear-gradient(to bottom, #ff3333, #cc0000); border-color: #880000; }
+        .psp-cross { background: linear-gradient(to bottom, #3333ff, #0000cc); border-color: #000088; }
+        .psp-square { background: linear-gradient(to bottom, #ff33ff, #cc00cc); border-color: #880088; }
+        
+        #shoulder-buttons { display: flex; justify-content: space-between; margin-top: 8px; }
+        .shoulder-button { background: linear-gradient(to bottom, #666, #333); border: 2px solid #222; color: white; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; box-shadow: 0 3px 0 #222, 0 5px 8px rgba(0,0,0,0.5); transition: all 0.1s; user-select: none; }
+        .shoulder-button:active, .shoulder-button.pressed { transform: translateY(2px); box-shadow: 0 1px 0 #222, 0 2px 4px rgba(0,0,0,0.5); }
+        
+        #menu-buttons { display: flex; gap: 10px; margin-top: 10px; }
+        #status { text-align: center; padding: 10px; font-size: 13px; color: #00d9ff; background: rgba(15,52,96,0.8); border-top: 2px solid #e94560; font-weight: 500; }
+        
+        #menu-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.97); display: none; flex-direction: column; justify-content: flex-start; align-items: center; gap: 15px; z-index: 10; padding: 20px; overflow-y: auto; }
+        #menu-overlay.active { display: flex; }
+        #menu-overlay h2 { margin: 10px 0 20px; color: #e94560; text-align: center; text-shadow: 0 0 10px #e94560, 2px 2px 4px #000; font-size: 28px; }
+        
+        .menu-button { background: linear-gradient(to bottom, #e94560, #c13548); border: 3px solid #a01030; color: white; padding: 16px 30px; border-radius: 12px; font-size: 16px; width: 100%; max-width: 320px; font-weight: bold; text-shadow: 1px 1px 2px #000; box-shadow: 0 4px 0 #a01030, 0 6px 12px rgba(0,0,0,0.7); cursor: pointer; transition: all 0.1s; }
+        .menu-button:active { background: linear-gradient(to bottom, #ff5577, #e94560); transform: translateY(3px); box-shadow: 0 1px 0 #a01030, 0 2px 5px rgba(0,0,0,0.7); }
+        
+        .file-input { display: none; }
+        .file-label { background: linear-gradient(to bottom, #00d9ff, #0099cc); display: block; padding: 16px; border-radius: 12px; text-align: center; cursor: pointer; width: 100%; max-width: 320px; border: 3px solid #006688; font-weight: bold; text-shadow: 1px 1px 2px #000; box-shadow: 0 4px 0 #006688, 0 6px 12px rgba(0,0,0,0.7); color: white; transition: all 0.1s; font-size: 16px; }
+        .file-label:active { background: linear-gradient(to bottom, #00ffff, #00d9ff); transform: translateY(3px); box-shadow: 0 1px 0 #006688, 0 2px 5px rgba(0,0,0,0.7); }
+        
+        #debug-panel { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.9); padding: 10px; font-size: 11px; color: #0f0; display: none; max-width: 280px; max-height: 300px; overflow-y: auto; border: 2px solid #0f0; border-radius: 8px; font-family: 'Courier New', monospace; }
+        #debug-panel.active { display: block; }
+        
+        #fullscreen-btn { position: absolute; top: 10px; right: 10px; background: linear-gradient(to bottom, #e94560, #c13548); border: 2px solid #a01030; color: white; padding: 10px 15px; border-radius: 10px; font-size: 14px; font-weight: bold; cursor: pointer; z-index: 15; box-shadow: 0 3px 0 #a01030, 0 5px 10px rgba(0,0,0,0.5); transition: all 0.1s; }
+        #fullscreen-btn:active { background: linear-gradient(to bottom, #ff5577, #e94560); transform: translateY(2px); box-shadow: 0 1px 0 #a01030, 0 2px 5px rgba(0,0,0,0.5); }
+        
+        body.fullscreen { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9999; }
+        body.fullscreen #screen-container { margin: 5px; border-radius: 0; border-width: 5px; }
+        body.fullscreen #controls { padding: 10px; }
+        
+        @media (orientation: landscape) {
+            body { flex-direction: row; }
+            #header { writing-mode: vertical-lr; transform: rotate(180deg); padding: 20px 10px; min-width: 50px; }
+            #screen-container { margin: 12px 8px; flex: 2; }
+            #controls { flex: 1; max-width: 240px; border-top: none; border-left: 3px solid #e94560; overflow-y: auto; }
+            #dpad { width: 130px; height: 130px; }
+            .action-button { width: 55px; height: 55px; }
+        }
+        
+        @media (orientation: portrait) {
+            #screen-container { flex: 2; }
+            #controls { flex: 1; }
+        }
+        
+        #cheat-manager { width: 100%; max-width: 320px; }
+        #cheat-input { width: 100%; padding: 12px; background: rgba(255,255,255,0.1); border: 2px solid #00d9ff; border-radius: 8px; color: #fff; font-size: 14px; font-family: monospace; margin-bottom: 10px; }
+        #cheat-list { max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.7); border: 2px solid #e94560; border-radius: 8px; padding: 8px; }
+        .cheat-item { padding: 8px; margin: 4px 0; background: rgba(233,69,96,0.3); border-radius: 5px; font-size: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .cheat-remove { background: #e94560; border: none; color: white; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>🎮 PSP EMULATOR</h1>
+        <div id="system-indicator">PSP-1000</div>
+        <div id="fps-counter">FPS: 0</div>
+    </div>
+    
+    <div id="screen-container">
+        <canvas id="screen" width="480" height="272"></canvas>
+        <button id="fullscreen-btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+        
+        <div id="debug-panel">
+            <div style="color: #00ffff; font-weight: bold; border-bottom: 1px solid #0f0; margin-bottom: 5px;">PSP DEBUG MODE</div>
+            <div id="debug-system">System: PSP | FPS: 0</div>
+            <div style="margin-top: 8px; color: #ffff00; font-weight: bold;">CPU State:</div>
+            <div id="debug-cpu">PC: 0x00000000</div>
+            <div id="debug-registers">Registers: -</div>
+            <div style="margin-top: 8px; color: #ffff00; font-weight: bold;">Memory:</div>
+            <div id="debug-memory">RAM: 0 MB / VRAM: 0 MB</div>
+            <div style="margin-top: 8px; color: #ffff00; font-weight: bold;">GPU:</div>
+            <div id="debug-gpu">Commands: 0 | Vertices: 0</div>
+        </div>
+        
+        <div id="menu-overlay">
+            <h2>PSP EMULATOR MENU</h2>
+            
+            <input type="file" id="bios-input" class="file-input" accept=".bin,.rom">
+            <label for="bios-input" class="file-label">📦 Load PSP BIOS</label>
+            
+            <input type="file" id="iso-input" class="file-input" accept=".iso,.cso,.chd">
+            <label for="iso-input" class="file-label">💿 Load ISO/CHD Game</label>
+            
+            <input type="file" id="cheat-input-file" class="file-input" accept=".db,.ini">
+            <label for="cheat-input-file" class="file-label">🎯 Load Cheat File</label>
+            
+            <input type="file" id="plugin-input" class="file-input" accept=".zip">
+            <label for="plugin-input" class="file-label">🔌 Load Plugin (ZIP)</label>
+            
+            <input type="file" id="save-import-input" class="file-input" accept=".json">
+            <label for="save-import-input" class="file-label">📥 Import Save Data</label>
+            
+            <button class="menu-button" onclick="exportSaveData()">💾 Export Save Data</button>
+            <button class="menu-button" onclick="saveState()">💫 Save State</button>
+            <button class="menu-button" onclick="loadState()">📂 Load State</button>
+            <button class="menu-button" onclick="toggleDebug()">🐛 Toggle Debug Mode</button>
+            <button class="menu-button" onclick="openKeyMapper()">🎮 Remap Controls</button>
+            <button class="menu-button" onclick="closeMenu()">▶️ Resume Emulation</button>
+        </div>
+    </div>
+    
+    <div id="controls">
+        <div id="dpad-container">
+            <div id="dpad">
+                <div class="dpad-button" id="dpad-up" data-button="up">▲</div>
+                <div class="dpad-button" id="dpad-left" data-button="left">◀</div>
+                <div id="dpad-center"></div>
+                <div class="dpad-button" id="dpad-right" data-button="right">▶</div>
+                <div class="dpad-button" id="dpad-down" data-button="down">▼</div>
+            </div>
+            
+            <div id="action-buttons">
+                <div class="action-button psp-triangle" data-button="triangle">△</div>
+                <div class="action-button psp-circle" data-button="circle">○</div>
+                <div class="action-button psp-cross" data-button="cross">✕</div>
+                <div class="action-button psp-square" data-button="square">□</div>
+            </div>
+        </div>
+        
+        <div id="shoulder-buttons">
+            <div class="shoulder-button" data-button="L">L</div>
+            <div class="shoulder-button" data-button="R">R</div>
+        </div>
+        
+        <div id="menu-buttons">
+            <button class="control-button" onclick="openMenu()">☰ Menu</button>
+            <button class="control-button" data-button="select">Select</button>
+            <button class="control-button" data-button="start">Start</button>
+        </div>
+    </div>
+    
+    <div id="status">Ready to load PSP BIOS and game...</div>
+
+    <script>
+    'use strict';
+
+    const PSP_MEMORY_SIZE = 32 * 1024 * 1024;
+    const PSP_VRAM_SIZE = 2 * 1024 * 1024;
+    const PSP_SCREEN_WIDTH = 480;
+    const PSP_SCREEN_HEIGHT = 272;
+    const CPU_CLOCK = 333000000;
+    const CYCLES_PER_FRAME = Math.floor(CPU_CLOCK / 60);
+
+    class PSPSystem {
+        constructor() {
+            this.memory = new ArrayBuffer(PSP_MEMORY_SIZE);
+            this.ram = new Uint8Array(this.memory);
+            this.ramView = new DataView(this.memory);
+            this.vram = new Uint8Array(PSP_VRAM_SIZE);
+            this.vramView = new DataView(this.vram.buffer);
+            
+            this.cpu = new PSPCPU(this);
+            this.gpu = new PSPGPU(this);
+            this.audio = new PSPAudio(this);
+            this.ge = new PSPGeometry(this);
+            
+            this.bios = null;
+            this.iso = null;
+            this.umdReader = null;
+            this.cheats = [];
+            this.plugins = [];
+            this.activeCheatCodes = new Map();
+            
+            this.running = false;
+            this.paused = false;
+            this.debugMode = false;
+            
+            this.fps = 0;
+            this.frameCount = 0;
+            this.lastFPSUpdate = performance.now();
+            this.lastFrameTime = performance.now();
+            
+            this.canvas = document.getElementById('screen');
+            this.gl = this.canvas.getContext('webgl2', {
+                alpha: false,
+                depth: true,
+                stencil: true,
+                antialias: false,
+                premultipliedAlpha: false
+            });
+            
+            if (!this.gl) {
+                this.gl = this.canvas.getContext('webgl');
+            }
+            
+            this.ctx2d = this.gl ? null : this.canvas.getContext('2d');
+            
+            this.initInput();
+            this.initStorage();
+            this.initKeyMappings();
+            
+            this.log('PSP System initialized');
+        }
+
+        initInput() {
+            this.buttons = {
+                up: false, down: false, left: false, right: false,
+                triangle: false, circle: false, cross: false, square: false,
+                L: false, R: false, start: false, select: false
+            };
+            
+            const buttonElements = document.querySelectorAll('[data-button]');
+            buttonElements.forEach(elem => {
+                const button = elem.dataset.button;
+                
+                elem.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.buttons[button] = true;
+                    elem.classList.add('pressed');
+                });
+                
+                elem.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    this.buttons[button] = false;
+                    elem.classList.remove('pressed');
+                });
+                
+                elem.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    this.buttons[button] = true;
+                    elem.classList.add('pressed');
+                });
+                
+                elem.addEventListener('mouseup', (e) => {
+                    e.preventDefault();
+                    this.buttons[button] = false;
+                    elem.classList.remove('pressed');
+                });
+            });
+        }
+
+        initKeyMappings() {
+            this.keyMap = {
+                'ArrowUp': 'up',
+                'ArrowDown': 'down',
+                'ArrowLeft': 'left',
+                'ArrowRight': 'right',
+                'KeyX': 'cross',
+                'KeyZ': 'circle',
+                'KeyA': 'square',
+                'KeyS': 'triangle',
+                'KeyQ': 'L',
+                'KeyW': 'R',
+                'Enter': 'start',
+                'ShiftRight': 'select'
+            };
+            
+            window.addEventListener('keydown', (e) => {
+                const button = this.keyMap[e.code];
+                if (button && this.buttons.hasOwnProperty(button)) {
+                    this.buttons[button] = true;
+                    e.preventDefault();
+                    
+                    const elem = document.querySelector(`[data-button="${button}"]`);
+                    if (elem) elem.classList.add('pressed');
+                }
+            });
+            
+            window.addEventListener('keyup', (e) => {
+                const button = this.keyMap[e.code];
+                if (button && this.buttons.hasOwnProperty(button)) {
+                    this.buttons[button] = false;
+                    e.preventDefault();
+                    
+                    const elem = document.querySelector(`[data-button="${button}"]`);
+                    if (elem) elem.classList.remove('pressed');
+                }
+            });
+        }
+
+        initStorage() {
+            const request = indexedDB.open('PSPEmulatorDB', 1);
+            
+            request.onerror = () => this.log('IndexedDB error');
+            request.onsuccess = (e) => {
+                this.db = e.target.result;
+                this.log('Storage ready');
+            };
+            
+            request.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('saves')) {
+                    db.createObjectStore('saves', { keyPath: 'id' });
+                }
+                if (!db.objectStoreNames.contains('states')) {
+                    db.createObjectStore('states', { keyPath: 'slot' });
+                }
+                if (!db.objectStoreNames.contains('config')) {
+                    db.createObjectStore('config', { keyPath: 'key' });
+                }
+            };
+        }
+
+        loadBIOS(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                this.bios = new Uint8Array(e.target.result);
+                this.log(`BIOS loaded: ${(this.bios.length / 1024).toFixed(2)} KB`);
+                
+                this.ram.set(this.bios.slice(0, Math.min(this.bios.length, 4 * 1024 * 1024)), 0);
+                
+                this.updateStatus('BIOS loaded successfully');
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        loadISO(file) {
+            this.log(`Loading ${file.name}...`);
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const data = new Uint8Array(e.target.result);
+                
+                if (file.name.toLowerCase().endsWith('.chd')) {
+                    this.iso = this.parseCHD(data);
+                } else if (file.name.toLowerCase().endsWith('.cso')) {
+                    this.iso = this.parseCSO(data);
+                } else {
+                    this.iso = data;
+                }
+                
+                this.log(`ISO loaded: ${(this.iso.length / 1024 / 1024).toFixed(2)} MB`);
+                this.umdReader = new UMDReader(this.iso);
+                this.parseUMD();
+                this.updateStatus(`Game loaded: ${file.name}`);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        parseCHD(data) {
+            const signature = String.fromCharCode(...data.slice(0, 8));
+            if (!signature.startsWith('MComprHD')) {
+                this.log('Warning: Invalid CHD signature');
+                return data;
+            }
+            
+            const version = data[12];
+            this.log(`CHD version ${version} detected`);
+            
+            return data;
+        }
+
+        parseCSO(data) {
+            const magic = String.fromCharCode(...data.slice(0, 4));
+            if (magic !== 'CISO') {
+                this.log('Warning: Invalid CSO signature');
+                return data;
+            }
+            
+            this.log('CSO format detected, decompressing...');
+            return data;
+        }
+
+        parseUMD() {
+            if (!this.umdReader) return;
+            
+            const volumeDescriptor = this.umdReader.getVolumeDescriptor();
+            if (volumeDescriptor) {
+                this.log(`UMD Volume: ${volumeDescriptor.volumeLabel}`);
+                this.log(`System: ${volumeDescriptor.systemId}`);
+            }
+            
+            const files = this.umdReader.listFiles();
+            this.log(`Files in UMD: ${files.length}`);
+            
+            const paramSfo = this.umdReader.readFile('PSP_GAME/PARAM.SFO');
+            if (paramSfo) {
+                const gameInfo = this.parseParamSFO(paramSfo);
+                this.log(`Game: ${gameInfo.TITLE || 'Unknown'}`);
+                this.log(`ID: ${gameInfo.DISC_ID || 'Unknown'}`);
+            }
+        }
+
+        parseParamSFO(data) {
+            const magic = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
+            if (magic !== 0x46535000) return {};
+            
+            const info = {};
+            const keyOffset = data[8] | (data[9] << 8) | (data[10] << 16) | (data[11] << 24);
+            const dataOffset = data[12] | (data[13] << 8) | (data[14] << 16) | (data[15] << 24);
+            const entries = data[16] | (data[17] << 8) | (data[18] << 16) | (data[19] << 24);
+            
+            for (let i = 0; i < entries; i++) {
+                const entryOffset = 20 + (i * 16);
+                const keyOff = data[entryOffset] | (data[entryOffset + 1] << 8);
+                const dataOff = data[entryOffset + 8] | (data[entryOffset + 9] << 8) | 
+                               (data[entryOffset + 10] << 16) | (data[entryOffset + 11] << 24);
+                const dataLen = data[entryOffset + 12] | (data[entryOffset + 13] << 8) | 
+                               (data[entryOffset + 14] << 16) | (data[entryOffset + 15] << 24);
+                
+                let key = '';
+                let idx = keyOffset + keyOff;
+                while (data[idx] !== 0 && idx < dataOffset) {
+                    key += String.fromCharCode(data[idx++]);
+                }
+                
+                let value = '';
+                const valueStart = dataOffset + dataOff;
+                for (let j = 0; j < dataLen && data[valueStart + j] !== 0; j++) {
+                    value += String.fromCharCode(data[valueStart + j]);
+                }
+                
+                if (key && value) {
+                    info[key] = value;
+                }
+            }
+            
+            return info;
+        }
+
+        loadCheats(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const content = e.target.result;
+                
+                if (file.name.endsWith('.db')) {
+                    this.parseCheatsDB(content);
+                } else if (file.name.endsWith('.ini')) {
+                    this.parseCheatsINI(content);
+                }
+                
+                this.log(`Loaded ${this.cheats.length} cheat(s)`);
+                this.updateStatus(`${this.cheats.length} cheats loaded`);
+            };
+            reader.readAsText(file);
+        }
+
+        parseCheatsDB(content) {
+            const lines = content.split('\n');
+            let currentCheat = null;
+            
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('_S')) {
+                    if (currentCheat) {
+                        this.cheats.push(currentCheat);
+                        this.activeCheatCodes.set(currentCheat.name, currentCheat);
+                    }
+                    currentCheat = { name: trimmed.substring(3).trim(), codes: [], enabled: true };
+                } else if (trimmed.startsWith('_L') && currentCheat) {
+                    const code = trimmed.substring(3).trim();
+                    const parts = code.split(' ');
+                    if (parts.length >= 2) {
+                        currentCheat.codes.push({
+                            address: parseInt(parts[0], 16),
+                            value: parseInt(parts[1], 16),
+                            type: parts[0].substring(0, 1)
+                        });
+                    }
+                } else if (trimmed.startsWith('_C') && currentCheat) {
+                    currentCheat.enabled = trimmed.substring(2, 3) === '1';
+                }
+            }
+            
+            if (currentCheat) {
+                this.cheats.push(currentCheat);
+                this.activeCheatCodes.set(currentCheat.name, currentCheat);
+            }
+        }
+
+        parseCheatsINI(content) {
+            const lines = content.split('\n');
+            let currentCheat = null;
+            
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+                    if (currentCheat) {
+                        this.cheats.push(currentCheat);
+                        this.activeCheatCodes.set(currentCheat.name, currentCheat);
+                    }
+                    currentCheat = { name: trimmed.slice(1, -1), codes: [], enabled: true };
+                } else if (trimmed && currentCheat && trimmed.includes('=')) {
+                    const [addrStr, valueStr] = trimmed.split('=');
+                    const address = parseInt(addrStr.trim(), 16);
+                    const value = parseInt(valueStr.trim(), 16);
+                    if (!isNaN(address) && !isNaN(value)) {
+                        currentCheat.codes.push({ address, value, type: '0' });
+                    }
+                }
+            }
+            
+            if (currentCheat) {
+                this.cheats.push(currentCheat);
+                this.activeCheatCodes.set(currentCheat.name, currentCheat);
+            }
+        }
+
+        loadPlugin(file) {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const zipData = new Uint8Array(e.target.result);
+                    const plugin = await this.parseZIP(zipData);
+                    this.plugins.push(plugin);
+                    this.log(`Plugin loaded: ${file.name}`);
+                    this.updateStatus(`Plugin loaded: ${file.name}`);
+                } catch (err) {
+                    this.log(`Plugin error: ${err.message}`);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        async parseZIP(data) {
+            const sig = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
+            if (sig !== 0x04034b50) {
+                throw new Error('Invalid ZIP signature');
+            }
+            
+            const plugin = { files: {}, metadata: {} };
+            let offset = 0;
+            
+            while (offset < data.length - 30) {
+                const localSig = data[offset] | (data[offset+1] << 8) | 
+                                (data[offset+2] << 16) | (data[offset+3] << 24);
+                
+                if (localSig !== 0x04034b50) break;
+                
+                const compMethod = data[offset + 8] | (data[offset + 9] << 8);
+                const compSize = data[offset + 18] | (data[offset + 19] << 8) | 
+                                (data[offset + 20] << 16) | (data[offset + 21] << 24);
+                const uncompSize = data[offset + 22] | (data[offset + 23] << 8) | 
+                                  (data[offset + 24] << 16) | (data[offset + 25] << 24);
+                const filenameLen = data[offset + 26] | (data[offset + 27] << 8);
+                const extraLen = data[offset + 28] | (data[offset + 29] << 8);
+                
+                const nameStart = offset + 30;
+                const filename = String.fromCharCode(...data.slice(nameStart, nameStart + filenameLen));
+                
+                const dataStart = nameStart + filenameLen + extraLen;
+                let fileData = data.slice(dataStart, dataStart + compSize);
+                
+                if (compMethod === 8) {
+                    this.log(`Decompressing ${filename}...`);
+                }
+                
+                plugin.files[filename] = fileData;
+                offset = dataStart + compSize;
+            }
+            
+            return plugin;
+        }
+
+        applyCheats() {
+            if (!this.running || this.cheats.length === 0) return;
+            
+            for (const cheat of this.cheats) {
+                if (!cheat.enabled) continue;
+                
+                for (const code of cheat.codes) {
+                    const addr = code.address & 0x1FFFFFFF;
+                    if (addr < this.ram.length) {
+                        switch (code.type) {
+                            case '0':
+                            case '1':
+                                this.ram[addr] = code.value & 0xFF;
+                                break;
+                            case '2':
+                                this.ramView.setUint16(addr, code.value & 0xFFFF, true);
+                                break;
+                            case '3':
+                                this.ramView.setUint32(addr, code.value, true);
+                                break;
+                        }
+                    }
+                }
+            }
+        }
+
+        start() {
+            if (!this.bios && !this.iso) {
+                this.log('No BIOS or ISO loaded - cannot start');
+                this.updateStatus('Please load BIOS and/or ISO first');
+                return;
+            }
+            
+            this.running = true;
+            this.paused = false;
+            this.cpu.reset();
+            this.gpu.init();
+            this.ge.init();
+            
+            this.log('Emulation started');
+            this.updateStatus('Emulation running...');
+            
+            requestAnimationFrame(() => this.mainLoop());
+        }
+
+        mainLoop() {
+            if (!this.running) return;
+            
+            const now = performance.now();
+            const deltaTime = now - this.lastFrameTime;
+            this.lastFrameTime = now;
+            
+            if (!this.paused) {
+                this.cpu.executeFrame();
+                this.applyCheats();
+                this.gpu.renderFrame();
+            }
+            
+            this.frameCount++;
+            if (now - this.lastFPSUpdate >= 1000) {
+                this.fps = this.frameCount;
+                this.frameCount = 0;
+                this.lastFPSUpdate = now;
+                
+                document.getElementById('fps-counter').textContent = `FPS: ${this.fps}`;
+                
+                if (this.debugMode) {
+                    this.updateDebugInfo();
+                }
+            }
+            
+            requestAnimationFrame(() => this.mainLoop());
+        }
+
+        pause() {
+            this.paused = !this.paused;
+            this.log(this.paused ? 'Paused' : 'Resumed');
+            this.updateStatus(this.paused ? 'Paused' : 'Running');
+        }
+
+        stop() {
+            this.running = false;
+            this.paused = false;
+            this.log('Emulation stopped');
+            this.updateStatus('Stopped');
+        }
+
+        saveState(slot = 0) {
+            if (!this.db) {
+                this.log('Storage not ready');
+                return;
+            }
+            
+            const state = {
+                slot: slot,
+                timestamp: Date.now(),
+                ram: Array.from(this.ram.slice(0, 8 * 1024 * 1024)),
+                vram: Array.from(this.vram.slice(0, 1 * 1024 * 1024)),
+                cpu: this.cpu.getState(),
+                gpu: this.gpu.getState()
+            };
+            
+            const transaction = this.db.transaction(['states'], 'readwrite');
+            const store = transaction.objectStore('states');
+            const request = store.put(state);
+            
+            request.onsuccess = () => {
+                this.log(`State saved to slot ${slot}`);
+                this.updateStatus('State saved!');
+            };
+            
+            request.onerror = () => {
+                this.log(`Failed to save state`);
+            };
+        }
+
+        loadState(slot = 0) {
+            if (!this.db) {
+                this.log('Storage not ready');
+                return;
+            }
+            
+            const transaction = this.db.transaction(['states'], 'readonly');
+            const store = transaction.objectStore('states');
+            const request = store.get(slot);
+            
+            request.onsuccess = () => {
+                const state = request.result;
+                if (state) {
+                    this.ram.set(new Uint8Array(state.ram), 0);
+                    this.vram.set(new Uint8Array(state.vram), 0);
+                    this.cpu.setState(state.cpu);
+                    this.gpu.setState(state.gpu);
+                    this.log(`State loaded from slot ${slot}`);
+                    this.updateStatus('State loaded!');
+                } else {
+                    this.log(`No state in slot ${slot}`);
+                    this.updateStatus('No save state found');
+                }
+            };
+        }
+
+        exportSaveData() {
+            if (!this.db) {
+                this.log('Storage not ready');
+                return;
+            }
+            
+            const transaction = this.db.transaction(['saves', 'states'], 'readonly');
+            const savesStore = transaction.objectStore('saves');
+            const statesStore = transaction.objectStore('states');
+            
+            const savesRequest = savesStore.getAll();
+            const statesRequest = statesStore.getAll();
+            
+            Promise.all([
+                new Promise(resolve => savesRequest.onsuccess = () => resolve(savesRequest.result)),
+                new Promise(resolve => statesRequest.onsuccess = () => resolve(statesRequest.result))
+            ]).then(([saves, states]) => {
+                const exportData = { saves, states, timestamp: Date.now() };
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `psp_savedata_${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                this.log('Save data exported');
+                this.updateStatus('Save data exported!');
+            });
+        }
+
+        importSaveData(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    const transaction = this.db.transaction(['saves', 'states'], 'readwrite');
+                    
+                    if (data.saves) {
+                        const savesStore = transaction.objectStore('saves');
+                        data.saves.forEach(save => savesStore.put(save));
+                    }
+                    
+                    if (data.states) {
+                        const statesStore = transaction.objectStore('states');
+                        data.states.forEach(state => statesStore.put(state));
+                    }
+                    
+                    this.log('Save data imported');
+                    this.updateStatus('Save data imported!');
+                } catch (err) {
+                    this.log(`Import error: ${err.message}`);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        updateDebugInfo() {
+            if (!this.debugMode) return;
+            
+            document.getElementById('debug-system').textContent = 
+                `System: PSP-1000 | FPS: ${this.fps}`;
+            document.getElementById('debug-cpu').textContent = 
+                `PC: 0x${this.cpu.pc.toString(16).padStart(8, '0').toUpperCase()}`;
+            document.getElementById('debug-registers').textContent = 
+                `v0: 0x${this.cpu.registers[2].toString(16).padStart(8, '0')} | ` +
+                `ra: 0x${this.cpu.registers[31].toString(16).padStart(8, '0')}`;
+            document.getElementById('debug-memory').textContent = 
+                `RAM: ${(this.ram.length / 1024 / 1024).toFixed(1)} MB | ` +
+                `VRAM: ${(this.vram.length / 1024 / 1024).toFixed(1)} MB`;
+            document.getElementById('debug-gpu').textContent = 
+                `Commands: ${this.gpu.commandCount} | Vertices: ${this.ge.vertexCount}`;
+        }
+
+        log(message) {
+            console.log(`[PSP] ${message}`);
+            if (this.debugMode) {
+                const panel = document.getElementById('debug-panel');
+                const time = new Date().toLocaleTimeString();
+                panel.innerHTML += `\n[${time}] ${message}`;
+                panel.scrollTop = panel.scrollHeight;
+            }
+        }
+
+        updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+    }
+
+    class PSPCPU {
+        constructor(system) {
+            this.sys = system;
+            this.pc = 0x04000000;
+            this.nextPC = this.pc + 4;
+            this.inDelaySlot = false;
+            
+            this.registers = new Int32Array(32);
+            this.fpu = new Float32Array(32);
+            this.hi = 0;
+            this.lo = 0;
+            
+            this.cop0 = new Uint32Array(32);
+            
+            this.cycles = 0;
+            this.instructionCount = 0;
+        }
+
+        reset() {
+            this.pc = this.sys.bios ? 0xBFC00000 : 0x08900000;
+            this.nextPC = this.pc + 4;
+            this.inDelaySlot = false;
+            this.registers.fill(0);
+            this.fpu.fill(0);
+            this.hi = 0;
+            this.lo = 0;
+            this.cycles = 0;
+            this.instructionCount = 0;
+            
+            this.cop0[12] = 0x00400004;
+            this.cop0[15] = 0x00002E00;
+            
+            this.sys.log('CPU reset');
+        }
+
+        executeFrame() {
+            const targetCycles = this.cycles + CYCLES_PER_FRAME;
+            let instructionsThisFrame = 0;
+            
+            while (this.cycles < targetCycles && this.sys.running && instructionsThisFrame < 100000) {
+                this.step();
+                this.cycles++;
+                instructionsThisFrame++;
+            }
+        }
+
+        step() {
+            const instruction = this.fetch();
+            this.execute(instruction);
+            
+            if (!this.inDelaySlot) {
+                this.pc = this.nextPC;
+                this.nextPC += 4;
+            } else {
+                this.inDelaySlot = false;
+            }
+            
+            this.instructionCount++;
+        }
+
+        fetch() {
+            const physAddr = this.translateAddress(this.pc);
+            if (physAddr === null || physAddr >= this.sys.ram.length - 3) {
+                return 0;
+            }
+            
+            return this.sys.ramView.getUint32(physAddr, true);
+        }
+
+        translateAddress(vaddr) {
+            if (vaddr < 0x80000000) {
+                return vaddr & 0x1FFFFFFF;
+            } else if (vaddr < 0xA0000000) {
+                return vaddr & 0x1FFFFFFF;
+            } else if (vaddr < 0xC0000000) {
+                return vaddr & 0x1FFFFFFF;
+            }
+            return vaddr & 0x1FFFFFFF;
+        }
+
+        execute(instruction) {
+            const opcode = (instruction >>> 26) & 0x3F;
+            const rs = (instruction >>> 21) & 0x1F;
+            const rt = (instruction >>> 16) & 0x1F;
+            const rd = (instruction >>> 11) & 0x1F;
+            const shamt = (instruction >>> 6) & 0x1F;
+            const funct = instruction & 0x3F;
+            const imm = instruction & 0xFFFF;
+            const signExtImm = (imm & 0x8000) ? (imm | 0xFFFF0000) : imm;
+            const target = instruction & 0x3FFFFFF;
+            
+            switch (opcode) {
+                case 0x00:
+                    this.executeSpecial(instruction, rs, rt, rd, shamt, funct);
+                    break;
+                
+                case 0x01:
+                    this.executeRegimm(instruction, rs, rt, signExtImm);
+                    break;
+                
+                case 0x02:
+                    this.nextPC = (this.pc & 0xF0000000) | (target << 2);
+                    this.inDelaySlot = true;
+                    break;
+                
+                case 0x03:
+                    this.registers[31] = this.pc + 8;
+                    this.nextPC = (this.pc & 0xF0000000) | (target << 2);
+                    this.inDelaySlot = true;
+                    break;
+                
+                case 0x04:
+                    if (this.registers[rs] === this.registers[rt]) {
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+                
+                case 0x05:
+                    if (this.registers[rs] !== this.registers[rt]) {
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+                
+                case 0x06:
+                    if (this.registers[rs] <= 0) {
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+                
+                case 0x07:
+                    if (this.registers[rs] > 0) {
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+                
+                case 0x08:
+                    this.registers[rt] = (this.registers[rs] + signExtImm) | 0;
+                    break;
+                
+                case 0x09:
+                    this.registers[rt] = (this.registers[rs] + signExtImm) >>> 0;
+                    break;
+                
+                case 0x0A:
+                    this.registers[rt] = (this.registers[rs] < signExtImm) ? 1 : 0;
+                    break;
+                
+                case 0x0B:
+                    this.registers[rt] = ((this.registers[rs] >>> 0) < (signExtImm >>> 0)) ? 1 : 0;
+                    break;
+                
+                case 0x0C:
+                    this.registers[rt] = this.registers[rs] & imm;
+                    break;
+                
+                case 0x0D:
+                    this.registers[rt] = this.registers[rs] | imm;
+                    break;
+                
+                case 0x0E:
+                    this.registers[rt] = this.registers[rs] ^ imm;
+                    break;
+                
+                case 0x0F:
+                    this.registers[rt] = imm << 16;
+                    break;
+                
+                case 0x10: case 0x11: case 0x12: case 0x13:
+                    this.executeCop(opcode - 0x10, instruction);
+                    break;
+                
+                case 0x14:
+                    if (this.registers[rs] === this.registers[rt]) {
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+                
+                case 0x15:
+                    if (this.registers[rs] !== this.registers[rt]) {
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+                
+                case 0x16:
+                    if (this.registers[rs] <= 0) {
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+                
+                case 0x17:
+                    if (this.registers[rs] > 0) {
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+                
+                case 0x20:
+                    this.loadByte(rt, rs, signExtImm, true);
+                    break;
+                
+                case 0x21:
+                    this.loadHalfword(rt, rs, signExtImm, true);
+                    break;
+                
+                case 0x22:
+                    this.loadWordLeft(rt, rs, signExtImm);
+                    break;
+                
+                case 0x23:
+                    this.loadWord(rt, rs, signExtImm);
+                    break;
+                
+                case 0x24:
+                    this.loadByte(rt, rs, signExtImm, false);
+                    break;
+                
+                case 0x25:
+                    this.loadHalfword(rt, rs, signExtImm, false);
+                    break;
+                
+                case 0x26:
+                    this.loadWordRight(rt, rs, signExtImm);
+                    break;
+                
+                case 0x28:
+                    this.storeByte(rt, rs, signExtImm);
+                    break;
+                
+                case 0x29:
+                    this.storeHalfword(rt, rs, signExtImm);
+                    break;
+                
+                case 0x2A:
+                    this.storeWordLeft(rt, rs, signExtImm);
+                    break;
+                
+                case 0x2B:
+                    this.storeWord(rt, rs, signExtImm);
+                    break;
+                
+                case 0x2E:
+                    this.storeWordRight(rt, rs, signExtImm);
+                    break;
+                
+                case 0x30:
+                    this.sys.log(`Syscall or unimplemented instruction`);
+                    break;
+            }
+            
+            this.registers[0] = 0;
+        }
+
+        executeSpecial(instruction, rs, rt, rd, shamt, funct) {
+            switch (funct) {
+                case 0x00:
+                    this.registers[rd] = this.registers[rt] << shamt;
+                    break;
+                
+                case 0x02:
+                    this.registers[rd] = this.registers[rt] >>> shamt;
+                    break;
+                
+                case 0x03:
+                    this.registers[rd] = this.registers[rt] >> shamt;
+                    break;
+                
+                case 0x04:
+                    this.registers[rd] = this.registers[rt] << (this.registers[rs] & 0x1F);
+                    break;
+                
+                case 0x06:
+                    this.registers[rd] = this.registers[rt] >>> (this.registers[rs] & 0x1F);
+                    break;
+                
+                case 0x07:
+                    this.registers[rd] = this.registers[rt] >> (this.registers[rs] & 0x1F);
+                    break;
+                
+                case 0x08:
+                    this.nextPC = this.registers[rs];
+                    this.inDelaySlot = true;
+                    break;
+                
+                case 0x09:
+                    this.registers[rd] = this.pc + 8;
+                    this.nextPC = this.registers[rs];
+                    this.inDelaySlot = true;
+                    break;
+                
+                case 0x0C:
+                    this.handleSyscall();
+                    break;
+                
+                case 0x0D:
+                    break;
+                
+                case 0x10:
+                    this.registers[rd] = this.hi;
+                    break;
+                
+                case 0x11:
+                    this.hi = this.registers[rs];
+                    break;
+                
+                case 0x12:
+                    this.registers[rd] = this.lo;
+                    break;
+                
+                case 0x13:
+                    this.lo = this.registers[rs];
+                    break;
+                
+                case 0x18:
+                    const prod = this.registers[rs] * this.registers[rt];
+                    this.lo = (prod & 0xFFFFFFFF) | 0;
+                    this.hi = ((prod / 0x100000000) | 0);
+                    break;
+                
+                case 0x19:
+                    const uprod = (this.registers[rs] >>> 0) * (this.registers[rt] >>> 0);
+                    this.lo = (uprod & 0xFFFFFFFF) >>> 0;
+                    this.hi = ((uprod / 0x100000000) >>> 0);
+                    break;
+                
+                case 0x1A:
+                    if (this.registers[rt] !== 0) {
+                        this.lo = (this.registers[rs] / this.registers[rt]) | 0;
+                        this.hi = (this.registers[rs] % this.registers[rt]) | 0;
+                    }
+                    break;
+                
+                case 0x1B:
+                    if (this.registers[rt] !== 0) {
+                        this.lo = ((this.registers[rs] >>> 0) / (this.registers[rt] >>> 0)) >>> 0;
+                        this.hi = ((this.registers[rs] >>> 0) % (this.registers[rt] >>> 0)) >>> 0;
+                    }
+                    break;
+                
+                case 0x20:
+                    this.registers[rd] = (this.registers[rs] + this.registers[rt]) | 0;
+                    break;
+                
+                case 0x21:
+                    this.registers[rd] = (this.registers[rs] + this.registers[rt]) >>> 0;
+                    break;
+                
+                case 0x22:
+                    this.registers[rd] = (this.registers[rs] - this.registers[rt]) | 0;
+                    break;
+                
+                case 0x23:
+                    this.registers[rd] = (this.registers[rs] - this.registers[rt]) >>> 0;
+                    break;
+                
+                case 0x24:
+                    this.registers[rd] = this.registers[rs] & this.registers[rt];
+                    break;
+                
+                case 0x25:
+                    this.registers[rd] = this.registers[rs] | this.registers[rt];
+                    break;
+                
+                case 0x26:
+                    this.registers[rd] = this.registers[rs] ^ this.registers[rt];
+                    break;
+                
+                case 0x27:
+                    this.registers[rd] = ~(this.registers[rs] | this.registers[rt]);
+                    break;
+                
+                case 0x2A:
+                    this.registers[rd] = (this.registers[rs] < this.registers[rt]) ? 1 : 0;
+                    break;
+                
+                case 0x2B:
+                    this.registers[rd] = ((this.registers[rs] >>> 0) < (this.registers[rt] >>> 0)) ? 1 : 0;
+                    break;
+            }
+        }
+
+        executeRegimm(instruction, rs, rt, signExtImm) {
+            switch (rt) {
+                case 0x00:
+                    if (this.registers[rs] < 0) {
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+                
+                case 0x01:
+                    if (this.registers[rs] >= 0) {
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+                
+                case 0x10:
+                    if (this.registers[rs] < 0) {
+                        this.registers[31] = this.pc + 8;
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+                
+                case 0x11:
+                    if (this.registers[rs] >= 0) {
+                        this.registers[31] = this.pc + 8;
+                        this.nextPC = this.pc + 4 + (signExtImm << 2);
+                        this.inDelaySlot = true;
+                    }
+                    break;
+            }
+        }
+
+        executeCop(cop, instruction) {
+            const rs = (instruction >>> 21) & 0x1F;
+            const rt = (instruction >>> 16) & 0x1F;
+            const rd = (instruction >>> 11) & 0x1F;
+            
+            if (cop === 0) {
+                switch (rs) {
+                    case 0x00:
+                        this.registers[rt] = this.cop0[rd];
+                        break;
+                    case 0x04:
+                        this.cop0[rd] = this.registers[rt];
+                        break;
+                }
+            }
+        }
+
+        handleSyscall() {
+            const syscallNum = this.registers[2];
+        }
+
+        loadWord(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = this.translateAddress(addr);
+            if (physAddr !== null && physAddr < this.sys.ram.length - 3) {
+                this.registers[rt] = this.sys.ramView.getInt32(physAddr, true);
+            }
+        }
+
+        loadByte(rt, rs, offset, signed) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = this.translateAddress(addr);
+            if (physAddr !== null && physAddr < this.sys.ram.length) {
+                const value = this.sys.ram[physAddr];
+                this.registers[rt] = signed && (value & 0x80) ? (value | 0xFFFFFF00) : value;
+            }
+        }
+
+        loadHalfword(rt, rs, offset, signed) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = this.translateAddress(addr);
+            if (physAddr !== null && physAddr < this.sys.ram.length - 1) {
+                const value = this.sys.ramView.getUint16(physAddr, true);
+                this.registers[rt] = signed && (value & 0x8000) ? (value | 0xFFFF0000) : value;
+            }
+        }
+
+        loadWordLeft(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = this.translateAddress(addr) & ~3;
+            if (physAddr !== null && physAddr < this.sys.ram.length - 3) {
+                const shift = (addr & 3) * 8;
+                const mask = 0xFFFFFFFF << shift;
+                const data = this.sys.ramView.getUint32(physAddr, true);
+                this.registers[rt] = (this.registers[rt] & ~mask) | (data << shift);
+            }
+        }
+
+        loadWordRight(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = this.translateAddress(addr) & ~3;
+            if (physAddr !== null && physAddr < this.sys.ram.length - 3) {
+                const shift = ((addr & 3) ^ 3) * 8;
+                const mask = 0xFFFFFFFF >>> shift;
+                const data = this.sys.ramView.getUint32(physAddr, true);
+                this.registers[rt] = (this.registers[rt] & ~mask) | (data >>> shift);
+            }
+        }
+
+        storeWord(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = this.translateAddress(addr);
+            if (physAddr !== null && physAddr < this.sys.ram.length - 3) {
+                this.sys.ramView.setInt32(physAddr, this.registers[rt], true);
+            }
+        }
+
+        storeByte(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = this.translateAddress(addr);
+            if (physAddr !== null && physAddr < this.sys.ram.length) {
+                this.sys.ram[physAddr] = this.registers[rt] & 0xFF;
+            }
+        }
+
+        storeHalfword(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = this.translateAddress(addr);
+            if (physAddr !== null && physAddr < this.sys.ram.length - 1) {
+                this.sys.ramView.setUint16(physAddr, this.registers[rt] & 0xFFFF, true);
+            }
+        }
+
+        storeWordLeft(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = this.translateAddress(addr) & ~3;
+            if (physAddr !== null && physAddr < this.sys.ram.length - 3) {
+                const shift = (addr & 3) * 8;
+                const mask = 0xFFFFFFFF >>> shift;
+                const data = this.sys.ramView.getUint32(physAddr, true);
+                this.sys.ramView.setUint32(physAddr, (data & ~mask) | (this.registers[rt] >>> shift), true);
+            }
+        }
+
+        storeWordRight(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = this.translateAddress(addr) & ~3;
+            if (physAddr !== null && physAddr < this.sys.ram.length - 3) {
+                const shift = ((addr & 3) ^ 3) * 8;
+                const mask = 0xFFFFFFFF << shift;
+                const data = this.sys.ramView.getUint32(physAddr, true);
+                this.sys.ramView.setUint32(physAddr, (data & ~mask) | (this.registers[rt] << shift), true);
+            }
+        }
+
+        getState() {
+            return {
+                pc: this.pc,
+                nextPC: this.nextPC,
+                registers: Array.from(this.registers),
+                fpu: Array.from(this.fpu),
+                hi: this.hi,
+                lo: this.lo,
+                cop0: Array.from(this.cop0),
+                cycles: this.cycles
+            };
+        }
+
+        setState(state) {
+            this.pc = state.pc;
+            this.nextPC = state.nextPC;
+            this.registers.set(state.registers);
+            this.fpu.set(state.fpu);
+            this.hi = state.hi;
+            this.lo = state.lo;
+            this.cop0.set(state.cop0);
+            this.cycles = state.cycles;
+        }
+    }
+
+    class PSPGPU {
+        constructor(system) {
+            this.sys = system;
+            this.commandQueue = [];
+            this.commandCount = 0;
+            this.displayList = null;
+            this.vertexType = 0;
+            this.primitiveType = 0;
+            
+            this.textures = new Map();
+            this.currentTexture = null;
+            
+            this.matrices = {
+                bone: [],
+                world: this.identityMatrix(),
+                view: this.identityMatrix(),
+                projection: this.identityMatrix()
+            };
+            
+            this.shaderProgram = null;
+            this.vertexBuffer = null;
+            this.indexBuffer = null;
+        }
+
+        init() {
+            if (!this.sys.gl) {
+                this.sys.log('WebGL not available, using 2D fallback');
+                return;
+            }
+            
+            const gl = this.sys.gl;
+            
+            const vertexShaderSource = `
+                attribute vec3 aPosition;
+                attribute vec2 aTexCoord;
+                attribute vec4 aColor;
+                
+                uniform mat4 uProjection;
+                uniform mat4 uView;
+                uniform mat4 uWorld;
+                
+                varying vec2 vTexCoord;
+                varying vec4 vColor;
+                
+                void main() {
+                    gl_Position = uProjection * uView * uWorld * vec4(aPosition, 1.0);
+                    vTexCoord = aTexCoord;
+                    vColor = aColor;
+                }
+            `;
+            
+            const fragmentShaderSource = `
+                precision mediump float;
+                
+                varying vec2 vTexCoord;
+                varying vec4 vColor;
+                
+                uniform sampler2D uTexture;
+                uniform bool uUseTexture;
+                
+                void main() {
+                    if (uUseTexture) {
+                        gl_FragColor = texture2D(uTexture, vTexCoord) * vColor;
+                    } else {
+                        gl_FragColor = vColor;
+                    }
+                }
+            `;
+            
+            const vertexShader = this.compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+            const fragmentShader = this.compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+            
+            this.shaderProgram = gl.createProgram();
+            gl.attachShader(this.shaderProgram, vertexShader);
+            gl.attachShader(this.shaderProgram, fragmentShader);
+            gl.linkProgram(this.shaderProgram);
+            
+            if (!gl.getProgramParameter(this.shaderProgram, gl.LINK_STATUS)) {
+                this.sys.log('Shader program link error');
+                return;
+            }
+            
+            this.attribs = {
+                position: gl.getAttribLocation(this.shaderProgram, 'aPosition'),
+                texCoord: gl.getAttribLocation(this.shaderProgram, 'aTexCoord'),
+                color: gl.getAttribLocation(this.shaderProgram, 'aColor')
+            };
+            
+            this.uniforms = {
+                projection: gl.getUniformLocation(this.shaderProgram, 'uProjection'),
+                view: gl.getUniformLocation(this.shaderProgram, 'uView'),
+                world: gl.getUniformLocation(this.shaderProgram, 'uWorld'),
+                texture: gl.getUniformLocation(this.shaderProgram, 'uTexture'),
+                useTexture: gl.getUniformLocation(this.shaderProgram, 'uUseTexture')
+            };
+            
+            this.vertexBuffer = gl.createBuffer();
+            this.indexBuffer = gl.createBuffer();
+            
+            gl.enable(gl.DEPTH_TEST);
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+            gl.depthFunc(gl.LEQUAL);
+            
+            this.sys.log('GPU initialized');
+        }
+
+        compileShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                this.sys.log('Shader compile error: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            
+            return shader;
+        }
+
+        renderFrame() {
+            if (this.sys.gl) {
+                this.renderWebGL();
+            } else if (this.sys.ctx2d) {
+                this.render2D();
+            }
+        }
+
+        renderWebGL() {
+            const gl = this.sys.gl;
+            
+            gl.viewport(0, 0, this.sys.canvas.width, this.sys.canvas.height);
+            gl.clearColor(0.0, 0.0, 0.2, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            
+            if (!this.shaderProgram) return;
+            
+            gl.useProgram(this.shaderProgram);
+            
+            this.matrices.projection = this.perspectiveMatrix(
+                Math.PI / 4,
+                this.sys.canvas.width / this.sys.canvas.height,
+                0.1,
+                1000.0
+            );
+            
+            gl.uniformMatrix4fv(this.uniforms.projection, false, this.matrices.projection);
+            gl.uniformMatrix4fv(this.uniforms.view, false, this.matrices.view);
+            gl.uniformMatrix4fv(this.uniforms.world, false, this.matrices.world);
+            gl.uniform1i(this.uniforms.useTexture, 0);
+            
+            if (this.sys.ge && this.sys.ge.vertices.length > 0) {
+                this.sys.ge.render(gl, this);
+            } else {
+                this.renderTestPattern(gl);
+            }
+        }
+
+        renderTestPattern(gl) {
+            const time = performance.now() / 1000;
+            const angle = time * 0.5;
+            
+            const vertices = [
+                Math.cos(angle) * 0.5, Math.sin(angle) * 0.5, 0.0,
+                Math.cos(angle + 2.09) * 0.5, Math.sin(angle + 2.09) * 0.5, 0.0,
+                Math.cos(angle + 4.19) * 0.5, Math.sin(angle + 4.19) * 0.5, 0.0
+            ];
+            
+            const colors = [
+                1.0, 0.0, 0.0, 1.0,
+                0.0, 1.0, 0.0, 1.0,
+                0.0, 0.0, 1.0, 1.0
+            ];
+            
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(this.attribs.position);
+            gl.vertexAttribPointer(this.attribs.position, 3, gl.FLOAT, false, 0, 0);
+            
+            const colorBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(this.attribs.color);
+            gl.vertexAttribPointer(this.attribs.color, 4, gl.FLOAT, false, 0, 0);
+            
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            
+            gl.deleteBuffer(colorBuffer);
+        }
+
+        render2D() {
+            const ctx = this.sys.ctx2d;
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, this.sys.canvas.width, this.sys.canvas.height);
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = '20px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('PSP Emulator', this.sys.canvas.width / 2, this.sys.canvas.height / 2 - 30);
+            ctx.font = '14px monospace';
+            ctx.fillText('Load BIOS and ISO to begin', this.sys.canvas.width / 2, this.sys.canvas.height / 2 + 10);
+            ctx.fillText(`FPS: ${this.sys.fps}`, this.sys.canvas.width / 2, this.sys.canvas.height / 2 + 40);
+        }
+
+        identityMatrix() {
+            return new Float32Array([
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1
+            ]);
+        }
+
+        perspectiveMatrix(fov, aspect, near, far) {
+            const f = 1.0 / Math.tan(fov / 2);
+            const rangeInv = 1.0 / (near - far);
+            
+            return new Float32Array([
+                f / aspect, 0, 0, 0,
+                0, f, 0, 0,
+                0, 0, (near + far) * rangeInv, -1,
+                0, 0, near * far * rangeInv * 2, 0
+            ]);
+        }
+
+        getState() {
+            return {
+                commandCount: this.commandCount,
+                vertexType: this.vertexType,
+                primitiveType: this.primitiveType
+            };
+        }
+
+        setState(state) {
+            this.commandCount = state.commandCount;
+            this.vertexType = state.vertexType;
+            this.primitiveType = state.primitiveType;
+        }
+    }
+
+    class PSPGeometry {
+        constructor(system) {
+            this.sys = system;
+            this.vertices = [];
+            this.vertexCount = 0;
+            this.indices = [];
+            this.primitiveMode = 0;
+        }
+
+        init() {
+            this.vertices = [];
+            this.vertexCount = 0;
+            this.indices = [];
+            this.sys.log('Geometry Engine initialized');
+        }
+
+        addVertex(x, y, z, u, v, color) {
+            this.vertices.push({ x, y, z, u, v, color });
+            this.vertexCount++;
+        }
+
+        clear() {
+            this.vertices = [];
+            this.vertexCount = 0;
+            this.indices = [];
+        }
+
+        render(gl, gpu) {
+            if (this.vertices.length === 0) return;
+            
+            const positions = [];
+            const texCoords = [];
+            const colors = [];
+            
+            for (const v of this.vertices) {
+                positions.push(v.x, v.y, v.z);
+                texCoords.push(v.u || 0, v.v || 0);
+                const c = v.color || 0xFFFFFFFF;
+                colors.push(
+                    ((c >> 0) & 0xFF) / 255,
+                    ((c >> 8) & 0xFF) / 255,
+                    ((c >> 16) & 0xFF) / 255,
+                    ((c >> 24) & 0xFF) / 255
+                );
+            }
+            
+            gl.bindBuffer(gl.ARRAY_BUFFER, gpu.vertexBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(gpu.attribs.position);
+            gl.vertexAttribPointer(gpu.attribs.position, 3, gl.FLOAT, false, 0, 0);
+            
+            const colorBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(gpu.attribs.color);
+            gl.vertexAttribPointer(gpu.attribs.color, 4, gl.FLOAT, false, 0, 0);
+            
+            gl.drawArrays(gl.TRIANGLES, 0, this.vertices.length);
+            
+            gl.deleteBuffer(colorBuffer);
+        }
+    }
+
+    class PSPAudio {
+        constructor(system) {
+            this.sys = system;
+            this.audioContext = null;
+            this.sampleRate = 44100;
+            this.channels = [];
+            
+            this.init();
+        }
+
+        init() {
+            try {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: this.sampleRate
+                });
+                this.sys.log('Audio initialized');
+            } catch (e) {
+                this.sys.log('Audio not available');
+            }
+        }
+
+        playTone(frequency, duration, volume = 0.1) {
+            if (!this.audioContext) return;
+            
+            const oscillator = this.audioContext.createOscillator();
+            const gainNode = this.audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(this.audioContext.destination);
+            
+            oscillator.frequency.value = frequency;
+            gainNode.gain.value = volume;
+            
+            oscillator.start();
+            oscillator.stop(this.audioContext.currentTime + duration);
+        }
+    }
+
+    class UMDReader {
+        constructor(isoData) {
+            this.data = isoData;
+            this.sectorSize = 2048;
+            this.fileTable = [];
+        }
+
+        getVolumeDescriptor() {
+            const sector = 16;
+            const offset = sector * this.sectorSize;
+            
+            if (offset + 2048 > this.data.length) return null;
+            
+            const type = this.data[offset];
+            const identifier = String.fromCharCode(...this.data.slice(offset + 1, offset + 6));
+            
+            if (identifier !== 'CD001') return null;
+            
+            const volumeLabel = String.fromCharCode(...this.data.slice(offset + 40, offset + 72)).trim();
+            const systemId = String.fromCharCode(...this.data.slice(offset + 8, offset + 40)).trim();
+            
+            return { type, identifier, volumeLabel, systemId };
+        }
+
+        listFiles() {
+            return this.fileTable;
+        }
+
+        readFile(path) {
+            const parts = path.split('/');
+            return null;
+        }
+    }
+
+    let pspSystem = null;
+
+    function init() {
+        pspSystem = new PSPSystem();
+        
+        document.getElementById('bios-input').addEventListener('change', (e) => {
+            if (e.target.files[0]) {
+                pspSystem.loadBIOS(e.target.files[0]);
+            }
+        });
+        
+        document.getElementById('iso-input').addEventListener('change', (e) => {
+            if (e.target.files[0]) {
+                pspSystem.loadISO(e.target.files[0]);
+            }
+        });
+        
+        document.getElementById('cheat-input-file').addEventListener('change', (e) => {
+            if (e.target.files[0]) {
+                pspSystem.loadCheats(e.target.files[0]);
+            }
+        });
+        
+        document.getElementById('plugin-input').addEventListener('change', (e) => {
+            if (e.target.files[0]) {
+                pspSystem.loadPlugin(e.target.files[0]);
+            }
+        });
+        
+        document.getElementById('save-import-input').addEventListener('change', (e) => {
+            if (e.target.files[0]) {
+                pspSystem.importSaveData(e.target.files[0]);
+            }
+        });
+        
+        pspSystem.start();
+        openMenu();
+    }
+
+    function openMenu() {
+        document.getElementById('menu-overlay').classList.add('active');
+        if (pspSystem) pspSystem.paused = true;
+    }
+
+    function closeMenu() {
+        document.getElementById('menu-overlay').classList.remove('active');
+        if (pspSystem) pspSystem.paused = false;
+    }
+
+    function toggleDebug() {
+        if (!pspSystem) return;
+        pspSystem.debugMode = !pspSystem.debugMode;
+        document.getElementById('debug-panel').classList.toggle('active');
+    }
+
+    function toggleFullscreen() {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen();
+            document.body.classList.add('fullscreen');
+        } else {
+            document.exitFullscreen();
+            document.body.classList.remove('fullscreen');
+        }
+    }
+
+    function saveState() {
+        if (pspSystem) {
+            pspSystem.saveState(0);
+        }
+    }
+
+    function loadState() {
+        if (pspSystem) {
+            pspSystem.loadState(0);
+        }
+    }
+
+    function exportSaveData() {
+        if (pspSystem) {
+            pspSystem.exportSaveData();
+        }
+    }
+
+    function openKeyMapper() {
+        alert('Key mapping: Arrow Keys=D-Pad, X=Cross, Z=Circle, A=Square, S=Triangle, Q=L, W=R');
+    }
+
+    window.addEventListener('load', init);
+    window.addEventListener('beforeunload', () => {
+        if (pspSystem && pspSystem.running) {
+            pspSystem.saveState(999);
+        }
+    });
+    </script>
+</body>
+</html>
