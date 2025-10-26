@@ -19,11 +19,13 @@ A fully self-contained PSP (PlayStation Portable) emulator built entirely in a s
 - Pure HTML/CSS/JavaScript with JSZip library for ZIP file handling
 - WebGL 2.0 for 3D graphics rendering
 - IndexedDB for persistent storage
-- MIPS R4000 CPU emulation
+- MIPS R4000 CPU emulation with 40+ opcodes
+- Branch delay slot implementation (MIPS architecture requirement)
 - PSP GPU emulation with geometry processing
 - Web Audio API for sound
 - FileReader API for file loading
 - Touch/Mouse drag API for analog stick controls
+- Performance optimizations: frame skipping, speed controls, batched execution
 
 ## Architecture
 - **PSPCPU** - MIPS R4000 instruction set emulation
@@ -78,6 +80,14 @@ All controls are remappable through the Controls menu.
 - ✅ Updated debug panel to show control states
 - ✅ Updated file inputs to accept .zip for BIOS and saves
 - ✅ Added visual feedback for all controls
+- ✅ Implemented comprehensive performance optimizations:
+  - Frame skipping system (auto-adjusts 0-3 frames based on performance)
+  - Speed multiplier controls (25%-200% via Slower/Faster buttons)
+  - Batched CPU execution with configurable cycles (1K-100K)
+  - Branch delay slot implementation (critical MIPS requirement)
+  - 40+ MIPS R4000 instructions (shifts, branches, ALU, loads/stores, syscalls)
+  - Performance monitoring with real-time FPS and timing metrics
+  - Dynamic instruction batching based on speed setting
 
 ## Last Updated
 October 26, 2025
