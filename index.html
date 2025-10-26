@@ -512,6 +512,10 @@
             <button class="menu-button" onclick="exportSaveData()">💾 Export Save Data</button>
             <button class="menu-button" onclick="saveState()">💫 Save State</button>
             <button class="menu-button" onclick="loadState()">📂 Load State</button>
+            <button class="menu-button" onclick="adjustSpeed(-0.25)">⏪ Slower</button>
+            <button class="menu-button" onclick="adjustSpeed(0.25)">⏩ Faster</button>
+            <button class="menu-button" onclick="adjustCycles(-5000)">🔽 Less CPU</button>
+            <button class="menu-button" onclick="adjustCycles(5000)">🔼 More CPU</button>
             <button class="menu-button" onclick="toggleDebug()">🐛 Toggle Debug Mode</button>
             <button class="menu-button" onclick="openKeyMapper()">🎮 Remap Controls</button>
             <button class="menu-button" onclick="toggleFullscreen()">⛶ Fullscreen Mode</button>
@@ -552,6 +556,13 @@
             this.frameCount = 0;
             this.lastFPSUpdate = performance.now();
             
+            this.frameSkip = 0;
+            this.frameSkipCounter = 0;
+            this.speedMultiplier = 1.0;
+            this.cyclesPerBatch = 10000;
+            this.executionTime = 0;
+            this.renderTime = 0;
+            
             this.canvas = document.getElementById('screen');
             this.gl = this.canvas.getContext('webgl2') || this.canvas.getContext('webgl');
             this.ctx2d = this.gl ? null : this.canvas.getContext('2d');
@@ -564,7 +575,7 @@
             window.addEventListener('resize', () => this.resizeCanvas());
             window.addEventListener('orientationchange', () => setTimeout(() => this.resizeCanvas(), 100));
             
-            this.log('PSP System initialized');
+            this.log('PSP System initialized - Performance mode enabled');
         }
 
         resizeCanvas() {
@@ -946,12 +957,30 @@
             if (!this.running) return;
             
             if (!this.paused) {
-                this.cpu.executeFrame();
+                const execStart = performance.now();
+                
+                this.cpu.executeFrameOptimized(this.cyclesPerBatch);
                 this.applyCheats();
-                this.gpu.renderFrame();
+                
+                this.executionTime = performance.now() - execStart;
+                
+                const shouldRender = this.frameSkipCounter === 0;
+                if (shouldRender) {
+                    const renderStart = performance.now();
+                    this.gpu.renderFrame();
+                    this.renderTime = performance.now() - renderStart;
+                }
+                
+                this.frameSkipCounter++;
+                if (this.frameSkipCounter > this.frameSkip) {
+                    this.frameSkipCounter = 0;
+                }
+                
+                if (shouldRender) {
+                    this.frameCount++;
+                }
             }
             
-            this.frameCount++;
             const now = performance.now();
             if (now - this.lastFPSUpdate >= 1000) {
                 this.fps = this.frameCount;
@@ -960,7 +989,22 @@
                 
                 document.getElementById('fps-display').textContent = `FPS: ${this.fps}`;
                 
-                if (this.debugMode) this.updateDebugInfo();
+                const avgExec = this.executionTime.toFixed(2);
+                const avgRender = this.renderTime.toFixed(2);
+                const total = (this.executionTime + this.renderTime).toFixed(2);
+                
+                if (this.debugMode) {
+                    this.updateDebugInfo();
+                    this.log(`Perf: Exec ${avgExec}ms, Render ${avgRender}ms, Total ${total}ms`);
+                }
+                
+                if (total > 16.67 && this.frameSkip < 3) {
+                    this.frameSkip++;
+                    this.log(`Performance low - frame skip: ${this.frameSkip}`);
+                } else if (total < 12 && this.frameSkip > 0) {
+                    this.frameSkip = Math.max(0, this.frameSkip - 1);
+                    this.log(`Performance improved - frame skip: ${this.frameSkip}`);
+                }
             }
             
             requestAnimationFrame(() => this.mainLoop());
@@ -1170,12 +1214,31 @@
                 instructionsThisFrame++;
             }
         }
+        
+        executeFrameOptimized(batchSize) {
+            let instructionsExecuted = 0;
+            const maxInstructions = Math.floor(batchSize * this.sys.speedMultiplier);
+            
+            if (this.sys.debugMode && this.cycles % 100000 === 0) {
+                this.sys.log(`Executing ${maxInstructions} instructions (batch: ${batchSize}, multiplier: ${this.sys.speedMultiplier})`);
+            }
+            
+            while (instructionsExecuted < maxInstructions && this.sys.running) {
+                this.step();
+                instructionsExecuted++;
+                this.cycles++;
+            }
+            
+            return instructionsExecuted;
+        }
 
         step() {
             const instruction = this.fetch();
             this.execute(instruction);
+            
+            const tempPC = this.pc;
             this.pc = this.nextPC;
-            this.nextPC += 4;
+            this.nextPC = tempPC + 4;
         }
 
         fetch() {
@@ -1193,45 +1256,165 @@
             const funct = instruction & 0x3F;
             const imm = instruction & 0xFFFF;
             const signExtImm = (imm & 0x8000) ? (imm | 0xFFFF0000) : imm;
+            const target = instruction & 0x03FFFFFF;
             
             switch (opcode) {
-                case 0x00:
-                    this.executeSpecial(rs, rt, rd, shamt, funct);
-                    break;
-                case 0x08:
-                    this.registers[rt] = (this.registers[rs] + signExtImm) | 0;
-                    break;
-                case 0x0F:
-                    this.registers[rt] = imm << 16;
-                    break;
-                case 0x23:
-                    this.loadWord(rt, rs, signExtImm);
-                    break;
-                case 0x2B:
-                    this.storeWord(rt, rs, signExtImm);
-                    break;
+                case 0x00: this.executeSpecial(rs, rt, rd, shamt, funct); break;
+                case 0x01: this.executeBranch(rs, rt, signExtImm); break;
+                case 0x02: this.nextPC = (this.pc & 0xF0000000) | (target << 2); break;
+                case 0x03: this.registers[31] = this.nextPC; this.nextPC = (this.pc & 0xF0000000) | (target << 2); break;
+                case 0x04: if (this.registers[rs] === this.registers[rt]) this.nextPC = this.pc + 4 + (signExtImm << 2); break;
+                case 0x05: if (this.registers[rs] !== this.registers[rt]) this.nextPC = this.pc + 4 + (signExtImm << 2); break;
+                case 0x06: if (this.registers[rs] <= 0) this.nextPC = this.pc + 4 + (signExtImm << 2); break;
+                case 0x07: if (this.registers[rs] > 0) this.nextPC = this.pc + 4 + (signExtImm << 2); break;
+                case 0x08: this.registers[rt] = (this.registers[rs] + signExtImm) | 0; break;
+                case 0x09: this.registers[rt] = (this.registers[rs] + signExtImm) >>> 0; break;
+                case 0x0A: this.registers[rt] = (this.registers[rs] < signExtImm) ? 1 : 0; break;
+                case 0x0B: this.registers[rt] = ((this.registers[rs] >>> 0) < (signExtImm >>> 0)) ? 1 : 0; break;
+                case 0x0C: this.registers[rt] = this.registers[rs] & imm; break;
+                case 0x0D: this.registers[rt] = this.registers[rs] | imm; break;
+                case 0x0E: this.registers[rt] = this.registers[rs] ^ imm; break;
+                case 0x0F: this.registers[rt] = imm << 16; break;
+                case 0x20: this.loadByte(rt, rs, signExtImm); break;
+                case 0x21: this.loadHalfword(rt, rs, signExtImm); break;
+                case 0x23: this.loadWord(rt, rs, signExtImm); break;
+                case 0x24: this.loadByteUnsigned(rt, rs, signExtImm); break;
+                case 0x25: this.loadHalfwordUnsigned(rt, rs, signExtImm); break;
+                case 0x28: this.storeByte(rt, rs, signExtImm); break;
+                case 0x29: this.storeHalfword(rt, rs, signExtImm); break;
+                case 0x2B: this.storeWord(rt, rs, signExtImm); break;
             }
             
             this.registers[0] = 0;
         }
+        
+        executeBranch(rs, rt, offset) {
+            const op = rt;
+            switch (op) {
+                case 0x00: if (this.registers[rs] < 0) this.nextPC = this.pc + 4 + (offset << 2); break;
+                case 0x01: if (this.registers[rs] >= 0) this.nextPC = this.pc + 4 + (offset << 2); break;
+                case 0x10: if (this.registers[rs] < 0) { this.registers[31] = this.nextPC; this.nextPC = this.pc + 4 + (offset << 2); } break;
+                case 0x11: if (this.registers[rs] >= 0) { this.registers[31] = this.nextPC; this.nextPC = this.pc + 4 + (offset << 2); } break;
+            }
+        }
 
         executeSpecial(rs, rt, rd, shamt, funct) {
             switch (funct) {
-                case 0x00:
-                    this.registers[rd] = this.registers[rt] << shamt;
+                case 0x00: this.registers[rd] = this.registers[rt] << shamt; break;
+                case 0x02: this.registers[rd] = this.registers[rt] >>> shamt; break;
+                case 0x03: this.registers[rd] = this.registers[rt] >> shamt; break;
+                case 0x04: this.registers[rd] = this.registers[rt] << (this.registers[rs] & 0x1F); break;
+                case 0x06: this.registers[rd] = this.registers[rt] >>> (this.registers[rs] & 0x1F); break;
+                case 0x07: this.registers[rd] = this.registers[rt] >> (this.registers[rs] & 0x1F); break;
+                case 0x08: this.nextPC = this.registers[rs]; break;
+                case 0x09: this.registers[rd] = this.nextPC; this.nextPC = this.registers[rs]; break;
+                case 0x0C: this.syscall(); break;
+                case 0x0D: break;
+                case 0x10: this.registers[rd] = this.hi; break;
+                case 0x11: this.registers[rd] = this.lo; break;
+                case 0x12: this.hi = this.registers[rs]; break;
+                case 0x13: this.lo = this.registers[rs]; break;
+                case 0x18: {
+                    const a = this.registers[rs] | 0;
+                    const b = this.registers[rt] | 0;
+                    const result = a * b;
+                    this.lo = result | 0;
+                    this.hi = Math.floor(result / 4294967296) | 0;
                     break;
-                case 0x08:
-                    this.nextPC = this.registers[rs];
+                }
+                case 0x19: {
+                    const a = this.registers[rs] >>> 0;
+                    const b = this.registers[rt] >>> 0;
+                    const result = a * b;
+                    this.lo = result | 0;
+                    this.hi = Math.floor(result / 4294967296) | 0;
                     break;
-                case 0x20:
-                    this.registers[rd] = (this.registers[rs] + this.registers[rt]) | 0;
+                }
+                case 0x1A: {
+                    const dividend = this.registers[rs] | 0;
+                    const divisor = this.registers[rt] | 0;
+                    if (divisor !== 0) {
+                        this.lo = Math.floor(dividend / divisor) | 0;
+                        this.hi = (dividend % divisor) | 0;
+                    }
                     break;
-                case 0x24:
-                    this.registers[rd] = this.registers[rs] & this.registers[rt];
+                }
+                case 0x1B: {
+                    const dividend = this.registers[rs] >>> 0;
+                    const divisor = this.registers[rt] >>> 0;
+                    if (divisor !== 0) {
+                        this.lo = Math.floor(dividend / divisor) | 0;
+                        this.hi = (dividend % divisor) | 0;
+                    }
                     break;
-                case 0x25:
-                    this.registers[rd] = this.registers[rs] | this.registers[rt];
+                }
+                case 0x20: this.registers[rd] = (this.registers[rs] + this.registers[rt]) | 0; break;
+                case 0x21: this.registers[rd] = (this.registers[rs] + this.registers[rt]) >>> 0; break;
+                case 0x22: this.registers[rd] = (this.registers[rs] - this.registers[rt]) | 0; break;
+                case 0x23: this.registers[rd] = (this.registers[rs] - this.registers[rt]) >>> 0; break;
+                case 0x24: this.registers[rd] = this.registers[rs] & this.registers[rt]; break;
+                case 0x25: this.registers[rd] = this.registers[rs] | this.registers[rt]; break;
+                case 0x26: this.registers[rd] = this.registers[rs] ^ this.registers[rt]; break;
+                case 0x27: this.registers[rd] = ~(this.registers[rs] | this.registers[rt]); break;
+                case 0x2A: this.registers[rd] = (this.registers[rs] < this.registers[rt]) ? 1 : 0; break;
+                case 0x2B: this.registers[rd] = ((this.registers[rs] >>> 0) < (this.registers[rt] >>> 0)) ? 1 : 0; break;
+            }
+        }
+        
+        syscall() {
+            const syscallNum = this.registers[2];
+            
+            switch (syscallNum) {
+                case 1:
+                    if (this.sys.debugMode) {
+                        this.sys.log(`Syscall: print int ${this.registers[4]}`);
+                    }
                     break;
+                case 4:
+                    if (this.sys.debugMode) {
+                        this.sys.log(`Syscall: print string at 0x${this.registers[4].toString(16)}`);
+                    }
+                    break;
+                case 10:
+                    this.sys.log('Syscall: Exit program');
+                    this.sys.running = false;
+                    break;
+                default:
+                    if (this.sys.debugMode && syscallNum !== 0) {
+                        this.sys.log(`Syscall ${syscallNum} (unimplemented)`);
+                    }
+            }
+        }
+
+        loadByte(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = addr & 0x1FFFFFFF;
+            if (physAddr < this.sys.ram.length) {
+                this.registers[rt] = this.sys.ramView.getInt8(physAddr);
+            }
+        }
+        
+        loadByteUnsigned(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = addr & 0x1FFFFFFF;
+            if (physAddr < this.sys.ram.length) {
+                this.registers[rt] = this.sys.ramView.getUint8(physAddr);
+            }
+        }
+        
+        loadHalfword(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = addr & 0x1FFFFFFF;
+            if (physAddr < this.sys.ram.length - 1) {
+                this.registers[rt] = this.sys.ramView.getInt16(physAddr, true);
+            }
+        }
+        
+        loadHalfwordUnsigned(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = addr & 0x1FFFFFFF;
+            if (physAddr < this.sys.ram.length - 1) {
+                this.registers[rt] = this.sys.ramView.getUint16(physAddr, true);
             }
         }
 
@@ -1240,6 +1423,22 @@
             const physAddr = addr & 0x1FFFFFFF;
             if (physAddr < this.sys.ram.length - 3) {
                 this.registers[rt] = this.sys.ramView.getInt32(physAddr, true);
+            }
+        }
+        
+        storeByte(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = addr & 0x1FFFFFFF;
+            if (physAddr < this.sys.ram.length) {
+                this.sys.ramView.setInt8(physAddr, this.registers[rt] & 0xFF);
+            }
+        }
+        
+        storeHalfword(rt, rs, offset) {
+            const addr = (this.registers[rs] + offset) >>> 0;
+            const physAddr = addr & 0x1FFFFFFF;
+            if (physAddr < this.sys.ram.length - 1) {
+                this.sys.ramView.setInt16(physAddr, this.registers[rt] & 0xFFFF, true);
             }
         }
 
@@ -1560,6 +1759,20 @@
 
     function openKeyMapper() {
         alert('Key mapping: Arrow Keys=D-Pad, X=Cross, Z=Circle, A=Square, S=Triangle, Q=L, W=R');
+    }
+    
+    function adjustSpeed(delta) {
+        if (!pspSystem) return;
+        pspSystem.speedMultiplier = Math.max(0.25, Math.min(2.0, pspSystem.speedMultiplier + delta));
+        pspSystem.log(`Speed: ${(pspSystem.speedMultiplier * 100).toFixed(0)}%`);
+        alert(`Emulation Speed: ${(pspSystem.speedMultiplier * 100).toFixed(0)}%`);
+    }
+    
+    function adjustCycles(delta) {
+        if (!pspSystem) return;
+        pspSystem.cyclesPerBatch = Math.max(1000, Math.min(100000, pspSystem.cyclesPerBatch + delta));
+        pspSystem.log(`CPU Cycles per batch: ${pspSystem.cyclesPerBatch}`);
+        alert(`CPU Cycles: ${pspSystem.cyclesPerBatch} per frame\n${pspSystem.cyclesPerBatch > 20000 ? 'Higher = Better compatibility, slower' : 'Lower = Faster, may skip instructions'}`);
     }
 
     window.addEventListener('load', init);
